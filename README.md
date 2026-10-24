@@ -1,4 +1,4 @@
-# my-tv
+# tv-UI
 
 A small home screen (launcher) for Android TV and Google TV that replaces the stock home: no sponsored rows, no recommendations, no analytics. One Kotlin file, no libraries; the debug APK is about 800 KB without artwork.
 
