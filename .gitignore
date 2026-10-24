@@ -5,3 +5,7 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+
+# Third-party art (not MIT): background painting and openpets.dev sprites. Add your own; see README.
+src/main/res/drawable-nodpi/
+.playwright-mcp/

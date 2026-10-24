@@ -4,21 +4,22 @@ import android.app.Activity
 import android.app.usage.StorageStatsManager
 import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Outline
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.RadialGradient
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.net.wifi.WifiManager
+import android.graphics.ColorFilter
+import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
 import android.os.Process
@@ -43,9 +44,16 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
+import kotlin.random.Random
+
+private const val INK = 0xFF2E2E2C.toInt()
+private const val MUTED = 0xFF8C8B87.toInt()
+private const val BACKDROP = 0xFFE9E8E4.toInt()
+private const val TRAY = 0x8C1C1B1F.toInt()
+private const val TONAL = 0x66FFFFFF.toInt()
+private const val ICON_BG = 0xF02A292F.toInt()
+private const val ON_TONAL = 0xFFE6E1E5.toInt()
 
 class MainActivity : Activity() {
 
@@ -58,11 +66,12 @@ class MainActivity : Activity() {
     )
 
     private lateinit var root: FrameLayout
-    private lateinit var lava: LavaView
     private lateinit var homeView: View
-    private lateinit var title: TextView
     private lateinit var weather: TextView
     private lateinit var leftStatus: View
+    private lateinit var rightStatus: View
+    private lateinit var pet: Pet
+    private lateinit var cat: Pet
     private lateinit var greeting: TextView
     private val greetingTick = object : Runnable {
         override fun run() { updateGreeting(); root.postDelayed(this, 60_000) }
@@ -70,20 +79,24 @@ class MainActivity : Activity() {
     private var weatherFetchedAt = 0L
     private lateinit var row1: LinearLayout
     private lateinit var row2: LinearLayout
+    private lateinit var glass: Glass
     private var listView: View? = null
     private var lastFocusKey: String? = null
     private var listIndex = 0
 
+    private fun dp(v: Float) = v * resources.displayMetrics.density
     private fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        root = FrameLayout(this)
-        lava = LavaView(this)
-        root.addView(lava, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        root = FrameLayout(this).apply { setBackgroundColor(BACKDROP) }
+        root.addView(ImageView(this).apply {
+            resources.getIdentifier("bg", "drawable", packageName).takeIf { it != 0 }?.let { setImageResource(it) }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+        }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.BOTTOM
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             setPadding(dp(24), dp(20), dp(24), dp(36))
             clipChildren = false
             clipToPadding = false
@@ -93,12 +106,12 @@ class MainActivity : Activity() {
             format24Hour = "EEEE, d MMMM"
             isAllCaps = true
             letterSpacing = 0.12f
-            setTextColor(0xD9FFFFFF.toInt())
+            setTextColor(MUTED)
             textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
         weather = TextView(this).apply {
-            setTextColor(Color.WHITE)
+            setTextColor(INK)
             textSize = 22f
             setPadding(0, dp(4), 0, 0)
         }
@@ -109,7 +122,7 @@ class MainActivity : Activity() {
         val time = TextClock(this).apply {
             format12Hour = "h:mm"
             format24Hour = "h:mm"
-            setTextColor(Color.WHITE)
+            setTextColor(INK)
             textSize = 40f
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
             includeFontPadding = false
@@ -118,38 +131,50 @@ class MainActivity : Activity() {
             format12Hour = "a"
             format24Hour = "a"
             isAllCaps = true
-            setTextColor(0xD9FFFFFF.toInt())
+            setTextColor(MUTED)
             textSize = 15f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setPadding(dp(6), 0, 0, dp(5))
         }
-        val rightStatus = LinearLayout(this).apply {
+        rightStatus = LinearLayout(this).apply {
             gravity = Gravity.BOTTOM
             addView(time); addView(amPm)
         }
-        title = TextView(this).apply {
-            textSize = 44f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setShadowLayer(24f, 0f, 2f, 0x99000000.toInt())
-            setPadding(dp(8), 0, 0, dp(14))
-        }
         row1 = card()
-        row2 = card()
-        content.addView(title)
-        content.addView(row1, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        content.addView(row2, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+        pet = Pet(this, CINDER)
+        cat = Pet(this, NEKO)
+        row1.addOnLayoutChangeListener { _, l, _, r, _, _, _, _, _ ->
+            // Pets draw in a layer that starts at the content padding; inset by the tray's corner radius so they never stand on the curve.
+            val left = l - content.paddingLeft + dp(28f)
+            val right = r - content.paddingLeft - dp(28f)
+            val mid = (left + right) / 2f
+            cat.laneLeft = left
+            cat.laneRight = mid - dp(4f)
+            pet.laneLeft = mid + dp(4f)
+            pet.laneRight = right
+        }
+        content.addView(FrameLayout(this).apply {
+            addView(cat, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(pet, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, dp(52)))
+        content.addView(row1, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         homeView = content
         root.addView(homeView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        row2 = LinearLayout(this).apply {
+            setPadding(dp(6), dp(10), dp(6), dp(10))
+            background = Flat(TRAY, dp(36).toFloat())
+        }
+        root.addView(row2, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = dp(18)
+        })
         greeting = TextView(this).apply {
-            textSize = 26f
+            textSize = 22f
             letterSpacing = 0.02f
-            setTextColor(0xF2FFFFFF.toInt())
+            setTextColor(INK)
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            setShadowLayer(18f, 0f, 2f, 0x66000000)
         }
         root.addView(greeting, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-            topMargin = dp(34)
+            topMargin = dp(102)
         })
         root.addView(leftStatus, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
             topMargin = dp(28); leftMargin = dp(32)
@@ -157,12 +182,18 @@ class MainActivity : Activity() {
         root.addView(rightStatus, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
             topMargin = dp(24); rightMargin = dp(32)
         })
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
+            glass.target = if (now?.parent === row1 || now?.parent === row2) now else null
+        }
+        glass = Glass(this)
+        root.addView(glass, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         setContentView(root)
     }
 
     override fun onResume() {
         super.onResume()
-        lava.start()
+        pet.start()
+        cat.start()
         greetingTick.run()
         fetchWeather()
         if (listView == null) renderHome() else {
@@ -193,8 +224,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateGreeting() {
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        greeting.text = when (hour) {
+        greeting.text = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
             in 5..11 -> "Good morning"
             in 12..16 -> "Good afternoon"
             in 17..21 -> "Good evening"
@@ -226,7 +256,8 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        lava.stop()
+        pet.stop()
+        cat.stop()
         root.removeCallbacks(greetingTick)
     }
 
@@ -251,14 +282,20 @@ class MainActivity : Activity() {
         row1.removeAllViews()
         row2.removeAllViews()
         favourites.mapNotNull { apps[it] }.forEach { row1.addView(appTile(it)) }
-        row2.addView(textTile("more", "All Apps", "All Apps") { openList() })
-        row2.addView(textTile("wifi", currentSsid(), "Wi-Fi") { launch(Intent(Settings.ACTION_WIFI_SETTINGS)) })
-        row2.addView(textTile("bluetooth", "Bluetooth", "Bluetooth") {
+        row2.addView(iconTile("more", R.drawable.ic_apps, dp(48)) { openList() })
+        row2.addView(iconTile("wifi", R.drawable.ic_wifi, dp(48)) { launch(Intent(Settings.ACTION_WIFI_SETTINGS)) })
+        row2.addView(iconTile("bluetooth", R.drawable.ic_bluetooth, dp(48)) {
             launch(Intent().setClassName("com.android.tv.settings", "com.android.tv.settings.accessories.AddAccessoryActivity"))
         })
-        row2.addView(textTile("inputs", "Inputs", "Inputs") { openInputs() })
-        row2.addView(textTile("settings", "Settings", "Settings") { launch(Intent(Settings.ACTION_SETTINGS)) })
-        val all = (0 until row1.childCount).map { row1.getChildAt(it) } + (0 until row2.childCount).map { row2.getChildAt(it) }
+        row2.addView(iconTile("inputs", R.drawable.ic_input, dp(48)) { openInputs() })
+        row2.addView(iconTile("settings", R.drawable.ic_settings, dp(48)) { launch(Intent(Settings.ACTION_SETTINGS)) })
+        for (i in 0 until minOf(row1.childCount, row2.childCount)) {
+            val app = row1.getChildAt(i).apply { id = View.generateViewId() }
+            val quick = row2.getChildAt(i).apply { id = View.generateViewId() }
+            app.nextFocusUpId = quick.id
+            quick.nextFocusDownId = app.id
+        }
+        val all = listOf(row1, row2).flatMap { g -> (0 until g.childCount).map { g.getChildAt(it) } }
         (all.firstOrNull { it.tag == lastFocusKey } ?: all.firstOrNull())?.requestFocus()
     }
 
@@ -266,38 +303,34 @@ class MainActivity : Activity() {
         val apps = apps().values.sortedBy { it.loadLabel(packageManager).toString().lowercase() }
         if (apps.isEmpty()) return
         listIndex = listIndex.coerceIn(0, apps.lastIndex)
-        val wheel = FrameLayout(this).apply { isFocusable = true }
+        val wheel = FrameLayout(this).apply {
+            isFocusable = true
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xE6121214.toInt(), 0x99121214.toInt()))
+        }
         wheel.addView(TextView(this).apply {
             text = "All Apps"
             textSize = 30f
             setTextColor(Color.WHITE)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(48); topMargin = dp(30) })
+        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(48); topMargin = dp(36) })
         wheel.addView(TextView(this).apply {
             text = "${apps.size} apps"
             textSize = 15f
             setTextColor(0x99FFFFFF.toInt())
-        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(50); topMargin = dp(72) })
-        val lineX = dp(164 - 24).toFloat()
-        wheel.addView(object : View(this) {
-            private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
-            private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        }, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(49); topMargin = dp(78) })
+        val highlight = object : View(this) {
+                    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1FFFFFFF }
+            private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat(); color = Color.WHITE }
             override fun onDraw(canvas: Canvas) {
-                val cy = height / 2f + dp(60)
-                val path = Path()
-                var o = -3.8f
-                while (o <= 3.8f) {
-                    val x = lineX - (1f - cos(o * 0.3f)) * dp(200)
-                    val y = cy + o * dp(84) * (1f - 0.05f * abs(o))
-                    if (o == -3.8f) path.moveTo(x, y) else path.lineTo(x, y)
-                    o += 0.1f
-                }
-                line.shader = LinearGradient(0f, cy - dp(220), 0f, cy + dp(220),
-                    intArrayOf(Color.TRANSPARENT, 0x99FFFFFF.toInt(), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-                canvas.drawPath(path, line)
-                canvas.drawCircle(lineX, cy, dp(5).toFloat(), dot)
+                val cy = height / 2f + dp(40)
+                val r = dp(36).toFloat()
+                val rect = RectF(dp(36).toFloat(), cy - r, dp(36 + 400).toFloat(), cy + r)
+                canvas.drawRoundRect(rect, r, r, fill)
+                if (wheel.isFocused) canvas.drawRoundRect(rect, r, r, ring)
             }
-        }, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }
+        wheel.addView(highlight, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        wheel.setOnFocusChangeListener { _, _ -> highlight.invalidate() }
 
         val slots = (-4..4).map {
             val icon = ImageView(this).apply {
@@ -309,18 +342,16 @@ class MainActivity : Activity() {
             }
             val name = TextView(this).apply {
                 setTextColor(Color.WHITE)
-                setPadding(dp(20), 0, 0, 0)
+                setPadding(dp(18), 0, 0, 0)
                 maxLines = 1
             }
             val row = LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 pivotX = 0f
-                addView(icon, LinearLayout.LayoutParams(dp(44), dp(44)))
+                addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
                 addView(name)
             }
-            wheel.addView(row, FrameLayout.LayoutParams(dp(420), dp(64), Gravity.CENTER_VERTICAL).apply {
-                leftMargin = dp(164); topMargin = dp(60)
-            })
+            wheel.addView(row, FrameLayout.LayoutParams(dp(370), dp(64), Gravity.CENTER_VERTICAL).apply { leftMargin = dp(52); topMargin = dp(40) })
             Triple(row, icon, name)
         }
 
@@ -343,11 +374,11 @@ class MainActivity : Activity() {
         val size = TextView(this).apply { textSize = 15f; setTextColor(0xB3FFFFFF.toInt()); setPadding(0, dp(2), 0, 0) }
         fun current() = apps[listIndex].activityInfo.packageName
         val actions = LinearLayout(this).apply { setPadding(0, dp(18), 0, 0) }
-        val openBtn = pill("Open", Color.WHITE) { launch(packageManager.getLeanbackLaunchIntentForPackage(current())) }
-        val infoBtn = pill("Info", Color.WHITE) {
+        val openBtn = pill("Open", ON_TONAL) { launch(packageManager.getLeanbackLaunchIntentForPackage(current())) }
+        val infoBtn = pill("Info", ON_TONAL) {
             launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${current()}")))
         }
-        val removeBtn = pill("Uninstall", 0xFFFF6B6B.toInt()) {
+        val removeBtn = pill("Uninstall", 0xFFF2B8B5.toInt()) {
             launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${current()}")))
         }
         listOf(openBtn, infoBtn, removeBtn).forEach { btn ->
@@ -365,18 +396,11 @@ class MainActivity : Activity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(20), dp(20), dp(20))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(32).toFloat()
-                setColor(0xE6141418.toInt())
-                setStroke(dp(1), 0x2EFFFFFF)
-            }
-            elevation = dp(10).toFloat()
+            background = Flat(TRAY, dp(28).toFloat())
             addView(banner, LinearLayout.LayoutParams(MATCH_PARENT, dp(168)))
             addView(cardName); addView(lastUsed); addView(size); addView(actions)
         }
-        wheel.addView(card, FrameLayout.LayoutParams(dp(340), WRAP_CONTENT, Gravity.CENTER_VERTICAL or Gravity.END).apply {
-            rightMargin = dp(48); topMargin = dp(60)
-        })
+        wheel.addView(card, FrameLayout.LayoutParams(dp(340), WRAP_CONTENT, Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dp(48) })
 
         fun updateCard() {
             val app = apps[listIndex]
@@ -410,15 +434,12 @@ class MainActivity : Activity() {
                 val far = abs(offset).toFloat()
                 icon.setImageDrawable(app.loadIcon(packageManager))
                 name.text = app.loadLabel(packageManager)
-                name.textSize = if (offset == 0) 34f else 24f
+                name.textSize = if (offset == 0) 26f else 20f
                 name.typeface = Typeface.create(if (offset == 0) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
-                row.translationY = offset * dp(84) * (1f - 0.05f * far)
-                row.translationX = -(1f - cos(offset * 0.3f)) * dp(200)
-                row.scaleX = 1f - 0.1f * far
+                row.translationY = offset * dp(72).toFloat()
+                row.scaleX = 1f - 0.06f * far
                 row.scaleY = row.scaleX
                 row.alpha = if (far >= 3f) 0f else 1f - 0.3f * far
-                row.cameraDistance = 12000f * resources.displayMetrics.density
-                row.rotationX = -offset * 5f
             }
             updateCard()
         }
@@ -441,6 +462,9 @@ class MainActivity : Activity() {
         layoutWheel()
         homeView.visibility = View.GONE
         leftStatus.visibility = View.GONE
+        rightStatus.visibility = View.GONE
+        row2.visibility = View.GONE
+        pet.visibility = View.GONE
         greeting.visibility = View.GONE
         root.addView(wheel, 1, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         listView = wheel
@@ -454,8 +478,8 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER
         isFocusable = true
         setPadding(dp(16), dp(9), dp(16), dp(9))
-        val idle = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(0x26FFFFFF) }
-        val focused = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(Color.WHITE) }
+        val idle = Flat(TONAL, dp(20).toFloat())
+        val focused = Flat(Color.WHITE, dp(20).toFloat())
         background = idle
         layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginEnd = dp(10) }
         setOnFocusChangeListener { _, has ->
@@ -486,20 +510,21 @@ class MainActivity : Activity() {
         listView = null
         homeView.visibility = View.VISIBLE
         leftStatus.visibility = View.VISIBLE
+        rightStatus.visibility = View.VISIBLE
+        row2.visibility = View.VISIBLE
+        pet.visibility = View.VISIBLE
         greeting.visibility = View.VISIBLE
+        pet.start()
+        cat.start()
         lastFocusKey = focusKey
         renderHome()
     }
 
     private fun card() = LinearLayout(this).apply {
-        setPadding(dp(8), dp(10), dp(8), dp(10))
+        setPadding(dp(14), dp(16), dp(14), dp(16))
         clipChildren = false
         clipToPadding = false
-        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF5141417.toInt(), 0xF50B0B0D.toInt())).apply {
-            cornerRadius = dp(30).toFloat()
-            setStroke(dp(1), 0x2EFFFFFF)
-        }
-        elevation = dp(6).toFloat()
+        background = Flat(TRAY, dp(28).toFloat())
     }
 
     private fun appTile(info: ResolveInfo): View {
@@ -511,57 +536,43 @@ class MainActivity : Activity() {
             setImageDrawable(art)
             scaleType = ImageView.ScaleType.CENTER_CROP
         }
-        return tile(pkg, info.loadLabel(packageManager).toString(), image) {
+        return tile(pkg, image, dp(136), dp(77), Color.TRANSPARENT, dp(12).toFloat()) {
             launch(packageManager.getLeanbackLaunchIntentForPackage(pkg))
         }
     }
 
-    private fun textTile(key: String, name: String, glyph: String, onClick: () -> Unit): View {
-        val label = TextView(this).apply {
-            text = glyph
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setBackgroundColor(0xFF3A3A44.toInt())
+    private fun iconTile(key: String, icon: Int, size: Int = dp(56), onClick: () -> Unit): View {
+        val image = ImageView(this).apply {
+            setImageResource(icon)
+            setColorFilter(ON_TONAL)
+            setPadding(size * 2 / 7, size * 2 / 7, size * 2 / 7, size * 2 / 7)
         }
-        return tile(key, name, label, onClick)
+        return tile(key, image, size, size, ICON_BG, size / 2f, onClick)
     }
 
-    private fun tile(key: String, name: String, art: View, onClick: () -> Unit): View {
-        val radius = dp(16).toFloat()
+    private fun tile(key: String, art: View, width: Int, height: Int, fill: Int, radius: Float, onClick: () -> Unit): View {
         val rounded = object : ViewOutlineProvider() {
             override fun getOutline(v: View, o: Outline) = o.setRoundRect(0, 0, v.width, v.height, radius)
         }
         art.clipToOutline = true
         art.outlineProvider = rounded
-        if (art.background == null) art.setBackgroundColor(0xFF1C1C22.toInt())
-        art.foreground = GradientDrawable().apply { this.cornerRadius = radius; setStroke(dp(1), 0x47FFFFFF) }
-        val tileWidth = (resources.displayMetrics.widthPixels - dp(24 * 2 + 8 * 2 + 12 * 5)) / 5
-        val ring = GradientDrawable().apply { cornerRadius = dp(21).toFloat(); setStroke(dp(3), Color.WHITE) }
         return FrameLayout(this).apply {
             tag = key
             isFocusable = true
-            setPadding(dp(5), dp(5), dp(5), dp(5))
+            background = Flat(fill, radius)
             addView(art, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-            layoutParams = LinearLayout.LayoutParams(tileWidth, tileWidth * 9 / 16).apply {
+            layoutParams = LinearLayout.LayoutParams(width, height).apply {
                 setMargins(dp(6), dp(2), dp(6), dp(2))
             }
             setOnFocusChangeListener { v, has ->
-                v.background = if (has) ring else null
+                v.scaleX = if (has) 1.06f else 1f
+                v.scaleY = v.scaleX
                 if (has) {
                     lastFocusKey = key
-                    title.text = name
                 }
             }
             setOnClickListener { onClick() }
         }
-    }
-
-    private fun currentSsid(): String {
-        val wifi = applicationContext.getSystemService(WifiManager::class.java)
-        @Suppress("DEPRECATION")
-        val ssid = wifi?.connectionInfo?.ssid?.trim('"')
-        return if (ssid.isNullOrBlank() || ssid == "<unknown ssid>") "Wi-Fi" else ssid
     }
 
     private fun openInputs() {
@@ -572,54 +583,158 @@ class MainActivity : Activity() {
     }
 }
 
-private class LavaView(context: Activity) : View(context) {
-    private val blobs = arrayOf(
-        floatArrayOf(0.16f, 0.22f, 0.0f, 0.0f),
-        floatArrayOf(0.13f, 0.19f, 2.1f, 1.6f),
-        floatArrayOf(0.19f, 0.11f, 4.2f, 3.2f),
-        floatArrayOf(0.10f, 0.16f, 5.5f, 4.7f),
-    )
-    private val palette = intArrayOf(
-        0xFF7A1F2B.toInt(), 0xFF9C4A2E.toInt(), 0xFFA8793A.toInt(), 0xFF2F6B5E.toInt(),
-        0xFF1F5F73.toInt(), 0xFF2B4A80.toInt(), 0xFF4A3C80.toInt(), 0xFF5C2E4F.toInt(),
-    )
+private class Flat(private val fill: Int, val radius: Float) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    private fun paletteAt(x: Float): Int {
-        val f = ((x % palette.size) + palette.size) % palette.size
-        val a = palette[f.toInt()]
-        val b = palette[(f.toInt() + 1) % palette.size]
-        val k = f - f.toInt()
-        fun ch(shift: Int) = (((a shr shift) and 0xFF) * (1 - k) + ((b shr shift) and 0xFF) * k).toInt() shl shift
-        return ch(16) or ch(8) or ch(0)
+    override fun draw(canvas: Canvas) {
+        paint.color = fill
+        canvas.drawRoundRect(RectF(bounds), radius, radius, paint)
     }
-    private val shade = Paint()
-    private val epoch = SystemClock.uptimeMillis()
-    private var running = false
 
-    fun start() { running = true; invalidate() }
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+private class Glass(context: Context) : View(context) {
+    private val d = resources.displayMetrics.density
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3 * d; color = Color.WHITE }
+    private val from = RectF()
+    private val current = RectF()
+    private val to = RectF()
+    private val loc = IntArray(2)
+    private val own = IntArray(2)
+    private var start = 0L
+    private var placed = false
+
+    var target: View? = null
+        set(v) {
+            if (v != null && placed) from.set(current) else placed = false
+            start = SystemClock.uptimeMillis()
+            field = v
+            invalidate()
+        }
+
+    // Reads the target's position every frame so it follows tiles while the tray is still moving.
+    override fun onDraw(canvas: Canvas) {
+        val t = target ?: return
+        if (!t.isShown) return
+        t.getLocationInWindow(loc)
+        getLocationInWindow(own)
+        val gap = 5 * d
+        val x = (loc[0] - own[0]).toFloat()
+        val y = (loc[1] - own[1]).toFloat()
+        to.set(x - gap, y - gap, x + t.width * t.scaleX + gap, y + t.height * t.scaleY + gap)
+        val k = ((SystemClock.uptimeMillis() - start) / 220f).coerceIn(0f, 1f)
+        val e = 1 - (1 - k) * (1 - k) * (1 - k)
+        if (!placed) { from.set(to); placed = true }
+        current.set(
+            from.left + (to.left - from.left) * e, from.top + (to.top - from.top) * e,
+            from.right + (to.right - from.right) * e, from.bottom + (to.bottom - from.bottom) * e,
+        )
+        val r = ((t.background as? Flat)?.radius ?: 12 * d) * t.scaleX + gap
+        canvas.drawRoundRect(current, r, r, ring)
+        if (k < 1f) postInvalidateOnAnimation()
+    }
+}
+
+// Which rows of an openpets.dev sheet a pet uses. Sheets are looked up by file name in res/drawable-nodpi and are not in the repo. Sheets are pre-processed so every frame's feet sit on the cell floor.
+private class PetSpec(
+    val sheet: String,
+    val frames: IntArray,
+    val walkLeft: Int,
+    val walkRight: Int,
+    val flipRight: Boolean,
+    val actions: IntArray,
+    val napRow: Int,
+    val napHold: Int,
+)
+
+private val CINDER = PetSpec("cinder", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 5, 6, 7, 8), 5, 4)
+// neko has no nap, and its "failed" row (5, crying) is left out.
+private val NEKO = PetSpec("neko", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 6, 7, 8), -1, -1)
+
+private class Pet(context: Context, private val spec: PetSpec) : View(context) {
+    private val sheet = resources.getIdentifier(spec.sheet, "drawable", context.packageName)
+        .takeIf { it != 0 }?.let { BitmapFactory.decodeResource(resources, it) }
+    private val cellW = (sheet?.width ?: 8) / 8
+    private val cellH = (sheet?.height ?: 9) / 9
+    private val d = resources.displayMetrics.density
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val src = Rect()
+    private val dst = RectF()
+    private var row = 0
+    private var frame = 0
+    private var walking = false
+    private var facingRight = false
+    private var x = -1f
+    private var targetX = 0f
+    private var actionEnds = 0L
+    private var lastFrame = 0L
+    private var lastTick = 0L
+    private var running = false
+    var laneLeft = 0f
+    var laneRight = 0f
+
+    fun start() { running = true; lastTick = SystemClock.uptimeMillis(); invalidate() }
     fun stop() { running = false }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        shade.shader = LinearGradient(0f, h * 0.3f, 0f, h.toFloat(), Color.TRANSPARENT, 0x59000000, Shader.TileMode.CLAMP)
+    private fun pick(now: Long, petW: Float) {
+        frame = 0
+        val room = laneRight - laneLeft - petW
+        walking = room > petW && Random.nextInt(100) < 45
+        if (walking) {
+            targetX = laneLeft + Random.nextFloat() * room
+            if (abs(targetX - x) < room * 0.25f) targetX = if (x - laneLeft > room / 2) laneLeft else laneLeft + room
+            facingRight = targetX > x
+            row = if (facingRight) spec.walkRight else spec.walkLeft
+            return
+        }
+        row = spec.actions.random()
+        actionEnds = now + when (row) {
+            spec.napRow -> 9000L
+            0 -> 3000L + Random.nextLong(3000)
+            else -> 2000L + Random.nextLong(1500)
+        }
+    }
+
+    private fun frameMs() = when {
+        walking -> 100L
+        row == spec.napRow -> 300L
+        row == 0 -> 170L
+        else -> 130L
     }
 
     override fun onDraw(canvas: Canvas) {
-        val t = (SystemClock.uptimeMillis() - epoch) / 1000f
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val base = paletteAt(t * 0.05f + 0.5f)
-        canvas.drawColor(Color.rgb(Color.red(base) * 3 / 5, Color.green(base) * 3 / 5, Color.blue(base) * 3 / 5))
-        for ((i, blob) in blobs.withIndex()) {
-            val (sx, sy, phase) = blob
-            val cx = w * (0.5f + 0.4f * sin(t * sx + phase))
-            val cy = h * (0.45f + 0.4f * cos(t * sy + phase * 1.3f))
-            val r = w * (0.5f + 0.1f * sin(t * 0.45f + phase))
-            val c = paletteAt(t * 0.05f + i * 1.3f)
-            paint.shader = RadialGradient(cx, cy, r, intArrayOf(c or 0xE6000000.toInt(), c or 0x80000000.toInt(), c), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
-            canvas.drawCircle(cx, cy, r, paint)
+        val sheet = sheet ?: return
+        val now = SystemClock.uptimeMillis()
+        val petH = height.toFloat()
+        val petW = petH * cellW / cellH
+        if (laneRight - laneLeft < petW) { if (running) postInvalidateDelayed(200); return }
+        if (x < 0f) { x = laneLeft + Random.nextFloat() * (laneRight - laneLeft - petW); pick(now, petW) }
+        x = x.coerceIn(laneLeft, laneRight - petW)
+        val dt = (now - lastTick).coerceAtMost(100) / 1000f
+        lastTick = now
+        if (walking) {
+            targetX = targetX.coerceIn(laneLeft, laneRight - petW)
+            val step = 48 * d * dt
+            if (abs(targetX - x) <= step) { x = targetX; pick(now, petW) }
+            else x += if (targetX > x) step else -step
+        } else if (now > actionEnds) pick(now, petW)
+        val holding = row == spec.napRow && spec.napHold >= 0 && frame >= spec.napHold
+        if (!holding && now - lastFrame > frameMs()) {
+            lastFrame = now
+            frame = if (row == spec.napRow && spec.napHold >= 0) minOf(frame + 1, spec.napHold) else (frame + 1) % spec.frames[row]
         }
-        canvas.drawRect(0f, 0f, w, h, shade)
-        if (running) postInvalidateDelayed(40)
+        src.set(frame * cellW, row * cellH, (frame + 1) * cellW, (row + 1) * cellH)
+        dst.set(x, 0f, x + petW, petH)
+        if (walking && facingRight && spec.flipRight) {
+            canvas.save()
+            canvas.scale(-1f, 1f, dst.centerX(), dst.centerY())
+            canvas.drawBitmap(sheet, src, dst, paint)
+            canvas.restore()
+        } else canvas.drawBitmap(sheet, src, dst, paint)
+        if (running) postInvalidateDelayed(if (holding) 500 else 66)
     }
 }

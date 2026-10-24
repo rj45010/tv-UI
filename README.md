@@ -8,7 +8,7 @@ Custom home screen (launcher) for a Hisense Android TV, replacing the stock Goog
 |---|---|
 | Model | Hisense SmartTV 4K FFM |
 | OS | Android TV 11, build RTT2.220118.001 |
-| Local IP | 192.168.29.193 (check Settings > System > About > Status if it changes) |
+| Local IP | Settings > System > About > Status. Use it in place of `<TV_IP>` below |
 | ADB | Network debugging on port 5555 |
 
 ## Mac setup (one time)
@@ -29,7 +29,7 @@ AGP 8.7 needs JDK 17. Java 22 does not work for the build.
 
 1. Settings > System > About, press OK on **Android TV OS build** 7 times.
 2. Settings > System > Developer options, turn on **USB debugging** (and Network debugging if listed).
-3. On the Mac: `adb connect 192.168.29.193:5555`
+3. On the Mac: `adb connect <TV_IP>:5555`
 4. Accept the prompt on the TV and tick "Always allow from this computer".
 
 ## Build and install
@@ -38,7 +38,7 @@ AGP 8.7 needs JDK 17. Java 22 does not work for the build.
 cd ~/tv-launcher
 export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ./gradlew assembleDebug
-adb connect 192.168.29.193:5555
+adb connect <TV_IP>:5555
 adb install -r build/outputs/apk/debug/tv-launcher-debug.apk
 ```
 
@@ -70,9 +70,6 @@ adb shell cmd package set-home-activity com.rahul.home/.MainActivity
 # Let the All Apps card show "last opened" and storage size
 adb shell appops set com.rahul.home GET_USAGE_STATS allow
 
-# Optional: Wi-Fi network name on the Wi-Fi tile
-adb shell pm grant com.rahul.home android.permission.ACCESS_FINE_LOCATION
-
 # Optional: free storage
 adb shell pm trim-caches 64G
 adb shell pm clear com.google.android.apps.tv.launcherx
@@ -95,7 +92,8 @@ A factory reset also restores the stock setup.
 ## How things work
 
 - **Weather**: location from https://ipwho.is (IP based, city level), temperature and condition from https://api.open-meteo.com. Both free, no key. Fetched every 30 minutes. ipapi.co was tried first and is rate limited.
-- **Background**: `LavaView`, 4 radial gradient blobs drawn about 25 times a second on its own timer, because the system animator is switched off. Stops when another app is open. About 10% CPU on this TV. A low-resolution bitmap version was tried and used 3 times more CPU.
+- **Theme**: flat Material 3 style on a painted landscape (`res/drawable-nodpi/bg.jpg`). Favourite apps sit in a translucent tray at the bottom. All Apps, Wi-Fi, Bluetooth, Inputs and Settings live as round buttons in a translucent pill (dynamic island) at the top. One `Glass` border slides to the focused tile on its own frame loop because `animator_duration_scale` is 0.
+- **Pets**: two openpets.dev sprites on the app row. neko (`res/drawable-nodpi/neko.webp`) roams the left half and Cinder (`cinder.webp`) the right half. Both sheets were re-cut so every frame's feet sit on the cell floor (the originals float and jitter), then scaled to 768x936. Each pet's rows are set in its `PetSpec`. Lanes stop at the tray's corner radius so pets never stand on the curve. Pets redraw about 15 times a second while Home is on screen and stop when another app is open.
 - **Bluetooth tile**: opens `com.android.tv.settings/.accessories.AddAccessoryActivity`. The standard `ACTION_BLUETOOTH_SETTINGS` does not exist on this TV and needs the `BLUETOOTH_ADMIN` permission declared.
 - **Inputs tile**: opens the Live TV app `com.mediatek.wwtv.tvcenter`.
 
