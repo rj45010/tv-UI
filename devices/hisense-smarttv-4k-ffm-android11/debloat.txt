@@ -1,0 +1,29 @@
+# Hisense SmartTV 4K FFM, Android TV 11, build RTT2.220118.001 (device songshan).
+# One package per line. Disabled with pm disable-user, never uninstalled; undo with pm enable.
+#
+# Apply:
+#   grep -v '^#' debloat.txt | grep . | while read p; do adb shell pm disable-user --user 0 "$p"; done
+#
+# NEVER disable com.hisense.tv.smartsense, com.vt.tv.smartsense.ui or com.vt.tv.aiot.
+# On this model that sent a TV into Android Recovery on the next boot (reported by CleanYourTV).
+
+# Store demo
+fusion.android.tv.demo
+com.hisense.storemode
+
+# Unused Hisense and Google apps
+com.hisense.alexa
+com.hisense.hibrowser
+com.google.android.videos
+com.google.android.play.games
+com.google.android.youtube.tvmusic
+com.google.android.apps.tv.dreamx
+
+# Stock home and setup wizard. Both outrank a third-party launcher, so they must go for this launcher to be Home.
+com.google.android.apps.tv.launcherx
+com.google.android.tungsten.setupwraith
+
+# From CleanYourTV's list for this model; not yet applied on the reference TV.
+# com.hisense.fte
+# android.autoinstalls.config.google.gtvpai
+# com.mstar.android.tv.disclaimercustomization

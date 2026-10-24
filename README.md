@@ -1,22 +1,20 @@
 # my-tv
 
-Custom home screen (launcher) for a Hisense Android TV, replacing the stock Google TV home.
+A small home screen (launcher) for Android TV and Google TV that replaces the stock home: no sponsored rows, no recommendations, no analytics. One Kotlin file, no libraries; the debug APK is about 800 KB without artwork.
 
-## The TV
+- Your favourite apps in one translucent row; the focused tile gets a white border that slides between tiles.
+- All Apps, Wi-Fi, Bluetooth, Inputs and Settings as round buttons in a pill at the top.
+- Clock, date, greeting and local weather.
+- An All Apps list with last-opened time, storage used, and Open, Info and Uninstall.
+- Optional: your own background image and openpets.dev pets that walk along the app row.
 
-| | |
-|---|---|
-| Model | Hisense SmartTV 4K FFM |
-| OS | Android TV 11, build RTT2.220118.001 |
-| Local IP | Settings > System > About > Status. Use it in place of `<TV_IP>` below |
-| ADB | Network debugging on port 5555 |
+Built and tested on one TV, a Hisense SmartTV 4K FFM on Android TV 11. Notes for it are in [devices/](devices/). Other models should work; add yours.
 
 ## Mac setup (one time)
 
 ```bash
 brew install android-platform-tools
 brew install --cask temurin@17 android-commandlinetools
-brew install gradle
 export ANDROID_HOME=$HOME/Library/Android/sdk
 yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses
 sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-34" "build-tools;34.0.0"
@@ -25,55 +23,41 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 AGP 8.7 needs JDK 17. Java 22 does not work for the build.
 
-## Enable ADB on the TV (one time, or after a reset)
+## Enable ADB on the TV
 
 1. Settings > System > About, press OK on **Android TV OS build** 7 times.
 2. Settings > System > Developer options, turn on **USB debugging** (and Network debugging if listed).
-3. On the Mac: `adb connect <TV_IP>:5555`
+3. Find the TV's IP in Settings > System > About > Status, then on the Mac: `adb connect <TV_IP>:5555`
 4. Accept the prompt on the TV and tick "Always allow from this computer".
 
 ## Build and install
 
 ```bash
-cd ~/tv-launcher
 export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 ./gradlew assembleDebug
-adb connect <TV_IP>:5555
 adb install -r build/outputs/apk/debug/tv-launcher-debug.apk
 ```
 
-All UI code is in `src/main/java/com/rahul/home/MainActivity.kt`. Row 1 apps are the `favourites` list at the top of that file.
+The favourite apps are the `favourites` list at the top of `src/main/java/com/rahul/home/MainActivity.kt`.
 
-## TV-side settings (not stored in the app)
-
-Run these after a factory reset, after installing the APK.
+## Make it the home screen
 
 ```bash
-# Turn off UI animations
+# The launcher animates on its own timer, so system animations can be off
 adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 
-# Disable preinstalled junk
-for p in fusion.android.tv.demo com.hisense.storemode com.hisense.alexa com.hisense.hibrowser \
-         com.google.android.videos com.google.android.play.games com.google.android.youtube.tvmusic \
-         com.google.android.apps.tv.dreamx; do
-  adb shell pm disable-user --user 0 $p
-done
-
-# Make this launcher the home screen.
-# Google TV home and the setup wizard both outrank third-party launchers, so they must be disabled.
+# Google TV home and its setup wizard outrank third-party launchers, so disable both
 adb shell pm disable-user --user 0 com.google.android.apps.tv.launcherx
 adb shell pm disable-user --user 0 com.google.android.tungsten.setupwraith
 adb shell cmd package set-home-activity com.rahul.home/.MainActivity
 
-# Let the All Apps card show "last opened" and storage size
+# Let the All Apps list show "last opened" and storage size
 adb shell appops set com.rahul.home GET_USAGE_STATS allow
-
-# Optional: free storage
-adb shell pm trim-caches 64G
-adb shell pm clear com.google.android.apps.tv.launcherx
 ```
+
+To remove preinstalled junk, use your model's `debloat.txt` in [devices/](devices/), or start from the [CleanYourTV](https://github.com/Gathin23/cleanyourtv) lists, which cover far more TVs. Read the warnings in the file before running it.
 
 ## Undo everything
 
@@ -84,27 +68,31 @@ adb uninstall com.rahul.home
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
   adb shell settings put global $k 1
 done
-# Re-enable any disabled app with: adb shell pm enable <package>
+# Re-enable anything else you disabled with: adb shell pm enable <package>
 ```
 
 A factory reset also restores the stock setup.
 
-## How things work
+## Background and pets (optional)
 
-- **Weather**: location from https://ipwho.is (IP based, city level), temperature and condition from https://api.open-meteo.com. Both free, no key. Fetched every 30 minutes. ipapi.co was tried first and is rate limited.
-- **Theme**: flat Material 3 style on a painted landscape (`res/drawable-nodpi/bg.jpg`). Favourite apps sit in a translucent tray at the bottom. All Apps, Wi-Fi, Bluetooth, Inputs and Settings live as round buttons in a translucent pill (dynamic island) at the top. One `Glass` border slides to the focused tile on its own frame loop because `animator_duration_scale` is 0.
-- **Pets**: two openpets.dev sprites on the app row. neko (`res/drawable-nodpi/neko.webp`) roams the left half and Cinder (`cinder.webp`) the right half. Both sheets were re-cut so every frame's feet sit on the cell floor (the originals float and jitter), then scaled to 768x936. Each pet's rows are set in its `PetSpec`. Lanes stop at the tray's corner radius so pets never stand on the curve. Pets redraw about 15 times a second while Home is on screen and stop when another app is open.
-- **Bluetooth tile**: opens `com.android.tv.settings/.accessories.AddAccessoryActivity`. The standard `ACTION_BLUETOOTH_SETTINGS` does not exist on this TV and needs the `BLUETOOTH_ADMIN` permission declared.
-- **Inputs tile**: opens the Live TV app `com.mediatek.wwtv.tvcenter`.
+The repo ships no artwork. The launcher looks for these files in `src/main/res/drawable-nodpi/` (ignored by git) and skips whatever is missing:
 
-## Limits found
+| File | What it is |
+|---|---|
+| `bg.jpg` | Background, cropped to fill the screen. Without it the background is plain. |
+| `cinder.webp` | A spritesheet from [openpets.dev](https://openpets.dev) that roams the right half of the app row. The rows used are set in `CINDER` in `MainActivity.kt`. |
+| `neko.webp` | A second spritesheet for the left half, set in `NEKO`. |
 
-- App artwork (shows, trailers) behind the home screen is not possible: only system-signed launchers can read the TV provider data.
-- The signed-in Google account cannot be read by apps since Android 11.
-- Preinstalled apps (Netflix, YouTube, Prime) cannot be uninstalled, only disabled.
-- Screenshots over ADB come back black while the TV is in standby. Wake it with `adb shell input keyevent KEYCODE_WAKEUP`.
-- Hisense does not usually ship major Android upgrades for this model. Check Settings > System > About > Upgrade.
+openpets.dev sheets are 8 columns by 9 rows. Many draw each frame at a different height, which makes the pet float and jitter; crop each frame and place its feet on the bottom of its cell before adding it. Check the rights on any art you add; openpets.dev pets are community uploads and many are fan art.
 
-## Storage notes (20 Oct 2026)
+The pets redraw about 15 times a second while Home is on screen (5 to 12% CPU on the reference TV) and stop when another app is open.
 
-Data partition 7.1 GB, 63% free after cleanup. The "12 of 16 GB used" figure in Settings includes about 9 GB of system partitions that cannot be reclaimed without root. Largest apps: JioHotstar (about 400 MB with data), Google Play Services (275 MB, keep), Google TTS (274 MB, can be disabled if accessibility speech is unused).
+## How it works
+
+- **Weather**: location from [ipwho.is](https://ipwho.is) (IP based, city level), temperature and condition from [Open-Meteo](https://open-meteo.com). Both free, no key. Fetched at most every 30 minutes.
+- **Animation**: the focus border and pets run their own frame loop, because `ValueAnimator` does nothing once `animator_duration_scale` is 0.
+- **Limits**: shows and trailers behind the home screen are not possible, because only system-signed launchers can read the TV provider data. The signed-in Google account cannot be read by apps since Android 11. Preinstalled apps such as Netflix, YouTube and Prime Video can be disabled but not uninstalled.
+
+## Credits and licence
+
+Code: MIT, see [LICENSE](LICENSE). Icons: [Material Icons](https://github.com/google/material-design-icons) by Google, Apache License 2.0. Several device notes come from [CleanYourTV](https://github.com/Gathin23/cleanyourtv).
