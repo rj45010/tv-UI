@@ -141,8 +141,8 @@ class MainActivity : Activity() {
             addView(time); addView(amPm)
         }
         row1 = card()
-        pet = Pet(this, CINDER)
-        cat = Pet(this, NEKO)
+        pet = Pet(this, RIGHT_PET)
+        cat = Pet(this, LEFT_PET)
         row1.addOnLayoutChangeListener { _, l, _, r, _, _, _, _, _ ->
             // Pets draw in a layer that starts at the content padding; inset by the tray's corner radius so they never stand on the curve.
             val left = l - content.paddingLeft + dp(28f)
@@ -651,9 +651,10 @@ private class PetSpec(
     val napHold: Int,
 )
 
-private val CINDER = PetSpec("cinder", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 5, 6, 7, 8), 5, 4)
-// neko has no nap, and its "failed" row (5, crying) is left out.
-private val NEKO = PetSpec("neko", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 6, 7, 8), -1, -1)
+// Rows tuned for Cinder from openpets.dev. See docs/pets.md to fit another pet.
+private val RIGHT_PET = PetSpec("pet_right", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 5, 6, 7, 8), 5, 4)
+// Rows tuned for neko: no nap, and its "failed" row (5, crying) is left out.
+private val LEFT_PET = PetSpec("pet_left", intArrayOf(6, 8, 8, 4, 5, 8, 6, 6, 6), 2, 1, false, intArrayOf(0, 3, 4, 6, 7, 8), -1, -1)
 
 private class Pet(context: Context, private val spec: PetSpec) : View(context) {
     private val sheet = resources.getIdentifier(spec.sheet, "drawable", context.packageName)

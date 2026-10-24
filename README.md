@@ -80,12 +80,10 @@ The repo ships no artwork. The launcher looks for these files in `src/main/res/d
 | File | What it is |
 |---|---|
 | `bg.jpg` | Background, cropped to fill the screen. Without it the background is plain. |
-| `cinder.webp` | A spritesheet from [openpets.dev](https://openpets.dev) that roams the right half of the app row. The rows used are set in `CINDER` in `MainActivity.kt`. |
-| `neko.webp` | A second spritesheet for the left half, set in `NEKO`. |
+| `pet_left.webp` | A pet from [openpets.dev](https://openpets.dev) that walks the left half of the app row. |
+| `pet_right.webp` | A second pet for the right half. |
 
-openpets.dev sheets are 8 columns by 9 rows. Many draw each frame at a different height, which makes the pet float and jitter; crop each frame and place its feet on the bottom of its cell before adding it. Check the rights on any art you add; openpets.dev pets are community uploads and many are fan art.
-
-The pets redraw about 15 times a second while Home is on screen (5 to 12% CPU on the reference TV) and stop when another app is open.
+[docs/pets.md](docs/pets.md) covers the sheet format, `tools/fit_pet.py` (which stops pets floating), which animations to use, and rights. The pets are not covered by this repo's licence.
 
 ## How it works
 
