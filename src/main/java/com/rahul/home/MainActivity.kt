@@ -20,7 +20,12 @@ import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
+import android.widget.Toast
 import android.os.Bundle
 import android.os.Process
 import android.os.storage.StorageManager
@@ -81,7 +86,20 @@ class MainActivity : Activity() {
     private lateinit var row2: LinearLayout
     private lateinit var glass: Glass
     private var listView: View? = null
-    private var lastFocusKey: String? = null
+    private var online: Boolean? = null
+    // Background apps (Hotstar trailers) keep playing after Home; holding focus on the home screen makes them pause.
+    private val silence by lazy { AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).build() }
+    private val netCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = runOnUiThread { showOnline(true) }
+        override fun onLost(network: Network) = runOnUiThread { showOnline(false) }
+    }
+
+    private fun showOnline(now: Boolean) {
+        if (online != null && online != now) Toast.makeText(this, if (now) "Wi-Fi connected" else "Wi-Fi disconnected", Toast.LENGTH_LONG).show()
+        online = now
+        ((row2.findViewWithTag<View>("wifi") as? FrameLayout)?.getChildAt(0) as? ImageView)?.setColorFilter(if (now) ON_TONAL else 0xFFFF5A52.toInt())
+    }
+    private var lastFocusKey: String? = "more"
     private var listIndex = 0
 
     private fun dp(v: Float) = v * resources.displayMetrics.density
@@ -201,6 +219,10 @@ class MainActivity : Activity() {
             listView = null
             openList()
         }
+        val cm = getSystemService(ConnectivityManager::class.java)
+        showOnline(cm.activeNetwork != null)
+        cm.registerDefaultNetworkCallback(netCallback)
+        getSystemService(AudioManager::class.java).requestAudioFocus(silence)
     }
 
     private fun fetchWeather() {
@@ -259,6 +281,8 @@ class MainActivity : Activity() {
         pet.stop()
         cat.stop()
         root.removeCallbacks(greetingTick)
+        getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(netCallback)
+        getSystemService(AudioManager::class.java).abandonAudioFocusRequest(silence)
     }
 
     @Deprecated("Deprecated in Java")
@@ -296,7 +320,8 @@ class MainActivity : Activity() {
             quick.nextFocusDownId = app.id
         }
         val all = listOf(row1, row2).flatMap { g -> (0 until g.childCount).map { g.getChildAt(it) } }
-        (all.firstOrNull { it.tag == lastFocusKey } ?: all.firstOrNull())?.requestFocus()
+        // The global focus listener does not fire before the window attaches, so point the ring at the first focus directly.
+        glass.target = (all.firstOrNull { it.tag == lastFocusKey } ?: all.firstOrNull())?.takeIf { it.requestFocus() }
     }
 
     private fun openList() {
